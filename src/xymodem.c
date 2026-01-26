@@ -45,8 +45,7 @@ struct xpacket_1k {
     uint8_t  seq;
     uint8_t  nseq;
     uint8_t  data[1024];
-    uint8_t  crc_hi;
-    uint8_t  crc_lo;
+    uint8_t  checksum;  // Changed from crc_hi/crc_lo
 } __attribute__((packed));
 
 struct xpacket {
@@ -54,8 +53,7 @@ struct xpacket {
     uint8_t  seq;
     uint8_t  nseq;
     uint8_t  data[128];
-    uint8_t  crc_hi;
-    uint8_t  crc_lo;
+    uint8_t  checksum;  // Changed from crc_hi/crc_lo
 } __attribute__((packed));
 
 /* See https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks */
@@ -71,22 +69,31 @@ static uint16_t crc16(const uint8_t *data, uint16_t size)
     return crc;
 }
 
+/* Simple 8-bit checksum */
+static uint8_t checksum(const uint8_t *data, uint16_t size)
+{
+    uint16_t sum = 0;
+    for (uint16_t i = 0; i < size; i++) {
+        sum += data[i];
+    }
+    return (sum & 0xff);
+}
+
 static int xmodem_1k(int sio, const void *data, size_t len, int seq)
 {
     struct xpacket_1k  packet;
     const uint8_t  *buf = data;
     char            resp = 0;
-    int             rc, crc;
+    int             rc;
+    uint8_t         csum;  // Changed type
 
-    /* Drain pending characters from serial line. Insist on the
-     * last drained character being 'C'.
-     */
+    /* Drain pending characters from serial line. Accept NAK or 'C' */
     while(1) {
         if (key_hit)
             return -1;
         rc = read_poll(sio, &resp, 1, 50);
         if (rc == 0) {
-            if (resp == 'C') break;
+            if (resp == 'C' || resp == NAK) break;  // Accept both
             if (resp == CAN) return ERR;
             continue;
         }
@@ -108,9 +115,8 @@ static int xmodem_1k(int sio, const void *data, size_t len, int seq)
         z = min(len, sizeof(packet.data));
         memcpy(packet.data, buf, z);
         memset(packet.data + z, 0, sizeof(packet.data) - z);
-        crc = crc16(packet.data, sizeof(packet.data));
-        packet.crc_hi = crc >> 8;
-        packet.crc_lo = crc;
+        csum = checksum(packet.data, sizeof(packet.data));  // Use checksum
+        packet.checksum = csum;  // Single byte
         packet.nseq = 0xff - packet.seq;
 
         /* Send packet */
@@ -168,7 +174,8 @@ static int xmodem_1k(int sio, const void *data, size_t len, int seq)
         }
     }
 
-    /* Send EOT at 1 Hz until ACK or CAN received */
+    /* Send EOT - handle receiver's NAK-then-ACK pattern */
+    int eot_count = 0;
     while (seq) {
         if (key_hit)
             return ERR;
@@ -177,6 +184,8 @@ static int xmodem_1k(int sio, const void *data, size_t len, int seq)
             return ERR;
         }
         write(STDOUT_FILENO, "|", 1);
+        eot_count++;
+        
         /* 1s timeout */
         rc = read_poll(sio, &resp, 1, 1000);
         if (rc < 0) {
@@ -184,6 +193,11 @@ static int xmodem_1k(int sio, const void *data, size_t len, int seq)
             return ERR;
         } else if(rc == 0) {
             continue;
+        }
+        
+        /* Receiver NAKs first EOT, ACKs second */
+        if (resp == NAK && eot_count == 1) {
+            continue;  // Expected, send another EOT
         }
         if (resp == ACK || resp == CAN) {
             write(STDOUT_FILENO, "\r\n", 2);
@@ -198,17 +212,16 @@ static int xmodem(int sio, const void *data, size_t len)
     struct xpacket  packet;
     const uint8_t  *buf = data;
     char            resp = 0;
-    int             rc, crc;
+    int             rc;
+    uint8_t         csum;  // Changed type
 
-    /* Drain pending characters from serial line. Insist on the
-     * last drained character being 'C'.
-     */
+    /* Drain pending characters from serial line. Accept NAK or 'C' */
     while(1) {
         if (key_hit)
             return -1;
         rc = read_poll(sio, &resp, 1, 50);
         if (rc == 0) {
-            if (resp == 'C') break;
+            if (resp == 'C' || resp == NAK) break;  // Accept both
             if (resp == CAN) return ERR;
             continue;
         }
@@ -230,9 +243,8 @@ static int xmodem(int sio, const void *data, size_t len)
         z = min(len, sizeof(packet.data));
         memcpy(packet.data, buf, z);
         memset(packet.data + z, 0, sizeof(packet.data) - z);
-        crc = crc16(packet.data, sizeof(packet.data));
-        packet.crc_hi = crc >> 8;
-        packet.crc_lo = crc;
+        csum = checksum(packet.data, sizeof(packet.data));  // Use checksum
+        packet.checksum = csum;  // Single byte
         packet.nseq = 0xff - packet.seq;
 
         /* Send packet */
@@ -287,7 +299,8 @@ static int xmodem(int sio, const void *data, size_t len)
         }
     }
 
-    /* Send EOT at 1 Hz until ACK or CAN received */
+    /* Send EOT - receiver expects to NAK first, then ACK second */
+    int eot_count = 0;
     while (1) {
         if (key_hit)
             return ERR;
@@ -296,6 +309,8 @@ static int xmodem(int sio, const void *data, size_t len)
             return ERR;
         }
         write(STDOUT_FILENO, "|", 1);
+        eot_count++;
+        
         /* 1s timeout */
         rc = read_poll(sio, &resp, 1, 1000);
         if (rc < 0) {
@@ -303,6 +318,11 @@ static int xmodem(int sio, const void *data, size_t len)
             return ERR;
         } else if(rc == 0) {
             continue;
+        }
+        
+        /* Receiver NAKs first EOT, ACKs second */
+        if (resp == NAK && eot_count == 1) {
+            continue;  // Expected, send another EOT
         }
         if (resp == ACK || resp == CAN) {
             write(STDOUT_FILENO, "\r\n", 2);
@@ -678,7 +698,7 @@ int xymodem_send(int sio, const char *filename, modem_mode_t mode)
     if (mode == XMODEM_1K) {
         rc = xmodem_1k(sio, buf, len, 1);
     }
-    else if (mode == XMODEM_CRC) {
+    else if (mode == XMODEM_128) {
         rc = xmodem(sio, buf, len);
     }
     else {
@@ -723,7 +743,7 @@ int xymodem_receive(int sio, const char *filename, modem_mode_t mode)
         tio_error_print("Not supported");
         rc = -1;
     }
-    else if (mode == XMODEM_CRC) {
+    else if (mode == XMODEM_128) {
         rc = xmodem_receive(sio, fd);
     }
     else {

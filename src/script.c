@@ -231,9 +231,9 @@ static int api_send(lua_State *L)
             tio_printf("%s", ret < 0 ? "Aborted" : "Done");
             break;
 
-        case XMODEM_CRC:
-            tio_printf("Sending file '%s' using XMODEM-CRC", file);
-            ret = xymodem_send(device_fd, file, XMODEM_CRC);
+        case XMODEM_128:
+            tio_printf("Sending file '%s' using XMODEM-128", file);
+            ret = xymodem_send(device_fd, file, XMODEM_128);
             tio_printf("%s", ret < 0 ? "Aborted" : "Done");
             break;
 
@@ -477,7 +477,7 @@ static void script_set_globals(lua_State *L)
     script_set_global(L, "toggle", 2);
     script_set_global(L, "high", 1);
     script_set_global(L, "low", 0);
-    script_set_global(L, "XMODEM_CRC", XMODEM_CRC);
+    script_set_global(L, "XMODEM_128", XMODEM_128);
     script_set_global(L, "XMODEM_1K", XMODEM_1K);
     script_set_global(L, "YMODEM", YMODEM);
 }

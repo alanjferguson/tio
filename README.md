@@ -431,7 +431,7 @@ Returns the `tio` table.
 
 Send file using x/y-modem protocol.
 
-Protocol can be any of `XMODEM_1K`, `XMODEM_CRC`, `YMODEM`.
+Protocol can be any of `XMODEM_1K`, `XMODEM_128`, `YMODEM`.
 
 #### `tio.ttysearch()`
 

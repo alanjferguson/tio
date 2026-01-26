@@ -23,7 +23,7 @@
 
 typedef enum {
     XMODEM_1K,
-    XMODEM_CRC,
+    XMODEM_128,
     YMODEM,
 } modem_mode_t;
 
