@@ -754,9 +754,9 @@ void handle_command_sequence(char input_char, char *output_char, bool *forward)
                         {
                             int ret;
 
-                            tio_printf("Ready to receiving file '%s'  ", line);
+                            tio_printf("Ready to receive file '%s'  ", line);
                             tio_printf("Press any key to abort transfer");
-                            ret = xymodem_send(device_fd, line, XMODEM_CRC);
+                            ret = xymodem_receive(device_fd, line, XMODEM_CRC);
                             tio_printf("%s", ret < 0 ? "Aborted" : "Done");
                         }
                         break;
